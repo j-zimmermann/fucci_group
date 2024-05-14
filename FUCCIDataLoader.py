@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from torchvision import transforms
 from aicsimageio import AICSImage
+from utils import compute_affinities
 
 
 class FUCCIDataset(Dataset):
@@ -14,10 +15,12 @@ class FUCCIDataset(Dataset):
         root_dir,
         source_channels: tuple,
         target_channels: tuple,
+        semantic=None,
         transform=None,
         source_transform=None,
         target_transform=None,
-        target_ending=".tif"
+        target_ending=".tif",
+        normalize=False,
     ):
         self.root_dir = os.path.join(
             "/group/dl4miacourse/projects/FUCCI", root_dir
@@ -30,8 +33,10 @@ class FUCCIDataset(Dataset):
         )
         self.source_channels = source_channels
         self.target_channels = target_channels
+        self.semantic = semantic
+        self.normalize = normalize
 
-        # transforms applied to raw image 
+        # transforms applied to raw image
         self.source_transform = source_transform
         self.target_transform = target_transform
 
@@ -82,12 +87,29 @@ class FUCCIDataset(Dataset):
         source_frames = self.open_videos[video_idx].get_image_dask_data(
             return_dims, C=self.source_channels, T=frame_idx
         )
-        source_frames = torch.from_numpy(source_frames.compute().astype(np.float32))
+        source_frames = source_frames.compute().astype(np.float32)
+
+        # normalize if needed
+        if self.normalize:
+            for channel_idx in range(source_frames.shape[0]):
+                source_frames[channel_idx] = (
+                    source_frames[channel_idx] - np.average(source_frames[channel_idx])
+                ) / np.std(source_frames[channel_idx])
+        source_frames = torch.from_numpy(source_frames)
 
         target_frames = self.open_targets[video_idx].get_image_dask_data(
             return_dims, C=self.target_channels, T=frame_idx
         )
-        target_frames = torch.from_numpy(target_frames.compute().astype(np.float32))
+        target_frames = target_frames.compute()
+        # if segmentation task semantic is not None
+        if self.semantic:
+            # binarize ground truth
+            target_frames = target_frames > 0
+        elif self.semantic is False:
+            # compute affinities
+            target_frames = compute_affinities(target_frames, [[0, 1], [1, 0]])
+        target_frames = target_frames.astype(np.float32)
+        target_frames = torch.from_numpy(target_frames)
 
         # transform raw image(s)
         if self.source_transform is not None:

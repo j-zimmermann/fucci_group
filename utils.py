@@ -6,6 +6,62 @@ from matplotlib import gridspec, ticker
 import numpy as np
 
 
+class WeightedMSELoss(torch.nn.MSELoss):
+
+    def __init__(self):
+        super(WeightedMSELoss, self).__init__()
+
+    def forward(self, prediction, target, weights):
+
+        return super(WeightedMSELoss, self).forward(
+            prediction * weights, target * weights
+        )
+
+
+def compute_affinities(seg: np.ndarray, nhood: list):
+    seg = np.squeeze(seg)
+    nhood = np.array(nhood)
+
+    shape = seg.shape
+    n_edges = nhood.shape[0]
+    dims = nhood.shape[1]
+    affinity = np.zeros((n_edges,) + shape, dtype=np.int32)
+
+    for e in range(n_edges):
+        affinity[
+            e,
+            max(0, -nhood[e, 0]) : min(shape[0], shape[0] - nhood[e, 0]),
+            max(0, -nhood[e, 1]) : min(shape[1], shape[1] - nhood[e, 1]),
+        ] = (
+            (
+                seg[
+                    max(0, -nhood[e, 0]) : min(shape[0], shape[0] - nhood[e, 0]),
+                    max(0, -nhood[e, 1]) : min(shape[1], shape[1] - nhood[e, 1]),
+                ]
+                == seg[
+                    max(0, nhood[e, 0]) : min(shape[0], shape[0] + nhood[e, 0]),
+                    max(0, nhood[e, 1]) : min(shape[1], shape[1] + nhood[e, 1]),
+                ]
+            )
+            * (
+                seg[
+                    max(0, -nhood[e, 0]) : min(shape[0], shape[0] - nhood[e, 0]),
+                    max(0, -nhood[e, 1]) : min(shape[1], shape[1] - nhood[e, 1]),
+                ]
+                > 0
+            )
+            * (
+                seg[
+                    max(0, nhood[e, 0]) : min(shape[0], shape[0] + nhood[e, 0]),
+                    max(0, nhood[e, 1]) : min(shape[1], shape[1] + nhood[e, 1]),
+                ]
+                > 0
+            )
+        )
+
+    return affinity
+
+
 def train(
     model,
     loader,
@@ -49,7 +105,19 @@ def train(
             # y = crop(y, prediction)
         if y.dtype != prediction.dtype:
             y = y.type(prediction.dtype)
-        loss = loss_function(prediction, y)
+        if isinstance(loss_function, WeightedMSELoss):
+            labels = y.cpu().numpy().astype(np.uint8)
+            classes, counts = np.unique(labels, return_counts=True)
+            if len(classes) != 2:
+                raise RuntimeError("Too many labels for weighting")
+            weights = np.zeros(shape=labels.shape)
+            for class_idx, count in zip(classes, counts):
+                weights[labels == class_idx] = count / labels.size
+            weights = torch.from_numpy(1.0 / weights)
+            weights.to("cuda")
+            loss = loss_function(prediction, y, weights)
+        else:
+            loss = loss_function(prediction, y)
 
         # backpropagate the loss and adjust the parameters
         loss.backward()
@@ -119,6 +187,7 @@ def plot_three(
     plt.tight_layout()
     plt.show()
 
+
 def plot_four(
     image: np.ndarray,
     image_ch2: np.ndarray,
@@ -134,25 +203,30 @@ def plot_four(
     fig = plt.figure(constrained_layout=False, figsize=(10, 3))
     spec = gridspec.GridSpec(ncols=4, nrows=1, figure=fig)
     ax1 = fig.add_subplot(spec[0, 0])
-    ax1.imshow(image, cmap="gray")  # show the image
+    t = ax1.imshow(image, cmap="gray")  # show the image
     ax1.set_xlabel("CH1", fontsize=20)
+    cbar = fig.colorbar(t, fraction=0.046, pad=0.04)
+
     ax2 = fig.add_subplot(spec[0, 1])
-    ax2.imshow(image_ch2, cmap="gray")  # show the masks
+    t = ax2.imshow(image_ch2, cmap="gray")  # show the masks
     ax2.set_xlabel("CH2", fontsize=20)
+    cbar = fig.colorbar(t, fraction=0.046, pad=0.04)
+
     ax3 = fig.add_subplot(spec[0, 2])
     t = ax3.imshow(pred)
-    ax3.set_xlabel("Pred.", fontsize=20)
+    ax3.set_xlabel("GT", fontsize=20)
     tick_locator = ticker.MaxNLocator(nbins=3)
     cbar = fig.colorbar(t, fraction=0.046, pad=0.04)
     cbar.locator = tick_locator
     cbar.update_ticks()
     ax4 = fig.add_subplot(spec[0, 3])
-    ax4.imshow(seg, cmap=cmap, interpolation="none")
-    ax4.set_xlabel("Seg.", fontsize=20)
+    t = ax4.imshow(seg, cmap=cmap, interpolation="none")
+    ax4.set_xlabel("Pred.", fontsize=20)
+    cbar = fig.colorbar(t, fraction=0.046, pad=0.04)
+
     _ = [ax.set_xticks([]) for ax in [ax1, ax2, ax3, ax4]]  # remove the xticks
     _ = [ax.set_yticks([]) for ax in [ax1, ax2, ax3, ax4]]  # remove the yticks
     plt.tight_layout()
-    plt.show()
 
 
 def plot_five(
