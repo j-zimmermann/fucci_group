@@ -7,6 +7,7 @@ from utils import train, plot_four, WeightedMSELoss
 from tqdm import tqdm
 import numpy as np
 from torchvision import transforms
+import matplotlib.pyplot as plt
 
 n_epochs = 16
 model_directory = "semantic_2_channel_model"
@@ -45,10 +46,11 @@ unet = UNet(
 unet.to(device)
 
 
-loss = torch.nn.MSELoss()
+# loss = torch.nn.MSELoss()
+loss = torch.nn.BCELoss()
 # loss = WeightedMSELoss()
-# optimizer = torch.optim.Adam(unet.parameters(), lr=1e-4)
-optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-4)
+optimizer = torch.optim.Adam(unet.parameters(), lr=1e-4)
+# optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-4)
 
 print("Start training")
 for epoch in tqdm(range(n_epochs)):
