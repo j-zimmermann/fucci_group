@@ -79,15 +79,15 @@ class FUCCIDataset(Dataset):
                 break
         # TODO wrap return_dims in functions
         return_dims = "CYX"
-        source_frames = self.open_videos[video_idx].get_image_data(
+        source_frames = self.open_videos[video_idx].get_image_dask_data(
             return_dims, C=self.source_channels, T=frame_idx
         )
-        source_frames = torch.from_numpy(source_frames.astype(np.float16))
+        source_frames = torch.from_numpy(source_frames.compute().astype(np.float32))
 
-        target_frames = self.open_targets[video_idx].get_image_data(
+        target_frames = self.open_targets[video_idx].get_image_dask_data(
             return_dims, C=self.target_channels, T=frame_idx
         )
-        target_frames = torch.from_numpy(target_frames.astype(np.float16))
+        target_frames = torch.from_numpy(target_frames.compute().astype(np.float32))
 
         # transform raw image(s)
         if self.source_transform is not None:
