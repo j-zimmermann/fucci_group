@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset
 import os
 import torch
+import numpy as np
 from torchvision import transforms
 from aicsimageio import AICSImage
 
@@ -14,7 +15,8 @@ class FUCCIDataset(Dataset):
         source_channels: tuple,
         target_channels: tuple,
         transform=None,
-        img_transform=None,
+        source_transform=None,
+        target_transform=None,
         target_ending=".tif"
     ):
         self.root_dir = os.path.join(
@@ -29,14 +31,9 @@ class FUCCIDataset(Dataset):
         self.source_channels = source_channels
         self.target_channels = target_channels
 
-        self.img_transform = img_transform  # transformations to apply to raw image only
-        #  transformations to apply just to inputs
-        inp_transforms = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Normalize([0.0], [1.0]),  # 0 = mean and 1 = variance
-            ]
-        )
+        # transforms applied to raw image 
+        self.source_transform = source_transform
+        self.target_transform = target_transform
 
         self.open_videos = []
         # we use a list to support videos of varying length
@@ -81,30 +78,39 @@ class FUCCIDataset(Dataset):
                 frame_idx = idx - (frames_seen - frames)
                 break
         # TODO wrap return_dims in functions
-        return_dims = "YX"
-        if isinstance(self.source_channels, tuple):
-            if len(self.source_channels) > 1:
-                return_dims = "CYX"
+        return_dims = "CYX"
         source_frames = self.open_videos[video_idx].get_image_data(
             return_dims, C=self.source_channels, T=frame_idx
         )
-
-        if isinstance(self.target_channels, tuple):
-            if len(self.target_channels) > 1:
-                return_dims = "CYX"
+        source_frames = torch.from_numpy(source_frames.astype(np.float16))
 
         target_frames = self.open_targets[video_idx].get_image_data(
             return_dims, C=self.target_channels, T=frame_idx
         )
+        target_frames = torch.from_numpy(target_frames.astype(np.float16))
+
+        # transform raw image(s)
+        if self.source_transform is not None:
+            source_frames = self.source_transform(source_frames)
+        if self.target_transform is not None:
+            target_frames = self.target_transform(target_frames)
+
+        # further transforms on both source and target
         if self.transform is not None:
-            seed = torch.seed()
-            torch.manual_seed(seed)
-            source_frames = self.transform(source_frames)
-            torch.manual_seed(seed)
-            target_frames = self.transform(target_frames)
-        if self.img_transform is not None:
-            source_frames = self.img_transform(source_frames)
-        return source_frames, target_frames
+            # TODO make nicer, hacked for now
+            # find batch with non-empty target mask
+            batch_found = False
+            while not batch_found:
+                seed = torch.seed()
+                torch.manual_seed(seed)
+                selected_source_frames = self.transform(source_frames)
+                torch.manual_seed(seed)
+                selected_target_frames = self.transform(target_frames)
+                if np.greater(selected_target_frames.mean(), 0.0):
+                    batch_found = True
+            return selected_source_frames, selected_target_frames
+        else:
+            return source_frames, target_frames
 
 
 '''
