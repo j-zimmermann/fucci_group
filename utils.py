@@ -6,6 +6,19 @@ from matplotlib import gridspec, ticker
 import numpy as np
 
 
+class DiceCoefficient(torch.nn.Module):
+    def __init__(self, eps=1e-6):
+        super().__init__()
+        self.eps = eps
+
+    # the dice coefficient of two sets represented as vectors a, b ca be
+    # computed as (2 *|a b| / (a^2 + b^2))
+    def forward(self, prediction, target):
+        intersection = (prediction * target).sum()
+        union = (prediction * prediction).sum() + (target * target).sum()
+        return 2 * intersection / union.clamp(min=self.eps)
+
+
 class WeightedMSELoss(torch.nn.MSELoss):
 
     def __init__(self):
@@ -24,7 +37,6 @@ def compute_affinities(seg: np.ndarray, nhood: list):
 
     shape = seg.shape
     n_edges = nhood.shape[0]
-    dims = nhood.shape[1]
     affinity = np.zeros((n_edges,) + shape, dtype=np.int32)
 
     for e in range(n_edges):
@@ -106,15 +118,16 @@ def train(
         if y.dtype != prediction.dtype:
             y = y.type(prediction.dtype)
         if isinstance(loss_function, WeightedMSELoss):
-            labels = y.cpu().numpy().astype(np.uint8)
-            classes, counts = np.unique(labels, return_counts=True)
+            # TODO currently assumes single channel
+            classes, counts = torch.unique(y, return_counts=True)
             if len(classes) != 2:
                 raise RuntimeError("Too many labels for weighting")
-            weights = np.zeros(shape=labels.shape)
+            weights = torch.zeros(y.shape)
+            weights = weights.to(device)
+            # go through classes and assign weights
             for class_idx, count in zip(classes, counts):
-                weights[labels == class_idx] = count / labels.size
-            weights = torch.from_numpy(1.0 / weights)
-            weights.to("cuda")
+                weights[y == class_idx] = count / torch.numel(y)
+            weights = 1.0 / weights
             loss = loss_function(prediction, y, weights)
         else:
             loss = loss_function(prediction, y)
