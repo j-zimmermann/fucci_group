@@ -22,7 +22,7 @@ class FUCCIDataset(Dataset):
         target_ending=".tif",
         normalize=False,
         source_folder_name="Source",
-        target_folder_name="Target"
+        target_folder_name="Target",
     ):
         self.root_dir = os.path.join(
             "/group/dl4miacourse/projects/FUCCI", root_dir
@@ -50,9 +50,13 @@ class FUCCIDataset(Dataset):
         self.open_targets = []
 
         for video_file_base in self.video_files:
-            video_file = os.path.join(self.root_dir, source_folder_name, video_file_base)
+            video_file = os.path.join(
+                self.root_dir, source_folder_name, video_file_base
+            )
             target_file_base = os.path.splitext(video_file_base)[0] + target_ending
-            target_file = os.path.join(self.root_dir, target_folder_name, target_file_base)
+            target_file = os.path.join(
+                self.root_dir, target_folder_name, target_file_base
+            )
             video = AICSImage(video_file)
             target = AICSImage(target_file)
             n_frames_source = video.dims.T
