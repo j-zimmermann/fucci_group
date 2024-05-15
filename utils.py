@@ -173,6 +173,53 @@ def train(
             break
 
 
+def validate(
+    model,
+    loader,
+    loss_function,
+    metric,
+    device=None,
+):
+    if device is None:
+        # You can pass in a device or we will default to using
+        # the gpu. Feel free to try training on the cpu to see
+        # what sort of performance difference there is
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        else:
+            device = torch.device("cpu")
+
+    # set model to eval mode
+    model.eval()
+    model.to(device)
+
+    # running loss and metric values
+    val_loss = 0
+    val_metric = 0
+
+    # disable gradients during validation
+    with torch.no_grad():
+        # iterate over validation loader and update loss and metric values
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+            prediction = model(x)
+            # We *usually* want the target to be the same type as the prediction
+            # however this is very dependent on your choice of loss function and
+            # metric. If you get errors such as "RuntimeError: Found dtype Float but expected Short"
+            # then this is where you should look.
+            if y.dtype != prediction.dtype:
+                y = y.type(prediction.dtype)
+            val_loss += loss_function(prediction, y).item()
+            # TODO introduce variable for segmentation threshold
+            val_metric += metric(prediction > 0.5, y).item()
+
+    # normalize loss and metric
+    val_loss /= len(loader)
+    val_metric /= len(loader)
+
+    return val_loss, val_metric
+
+
 def plot_three(
     image: np.ndarray, image_ch2: np.ndarray, pred: np.ndarray, label: str = "Target"
 ):
@@ -228,12 +275,9 @@ def plot_four(
     ax3 = fig.add_subplot(spec[0, 2])
     t = ax3.imshow(pred)
     ax3.set_xlabel("GT", fontsize=20)
-    tick_locator = ticker.MaxNLocator(nbins=3)
     cbar = fig.colorbar(t, fraction=0.046, pad=0.04)
-    cbar.locator = tick_locator
-    cbar.update_ticks()
     ax4 = fig.add_subplot(spec[0, 3])
-    t = ax4.imshow(seg, cmap=cmap, interpolation="none")
+    t = ax4.imshow(seg)
     ax4.set_xlabel("Pred.", fontsize=20)
     cbar = fig.colorbar(t, fraction=0.046, pad=0.04)
 
@@ -267,15 +311,13 @@ def plot_five(
     ax3.imshow(image_ch3, cmap="gray")  # show the masks
     ax3.set_xlabel("CH3", fontsize=20)
     ax4 = fig.add_subplot(spec[0, 3])
-    t = ax4.imshow(pred)
-    ax4.set_xlabel("Pred.", fontsize=20)
-    tick_locator = ticker.MaxNLocator(nbins=3)
+    t = ax4.imshow(pred, interpolation=None)
+    ax4.set_xlabel("GT", fontsize=20)
     cbar = fig.colorbar(t, fraction=0.046, pad=0.04)
-    cbar.locator = tick_locator
-    cbar.update_ticks()
     ax5 = fig.add_subplot(spec[0, 4])
-    ax5.imshow(seg, cmap=cmap, interpolation="none")
-    ax5.set_xlabel("Seg.", fontsize=20)
+    t = ax5.imshow(seg, interpolation=None)
+    ax5.set_xlabel("Pred.", fontsize=20)
+    cbar = fig.colorbar(t, fraction=0.046, pad=0.04)
     _ = [ax.set_xticks([]) for ax in [ax1, ax2, ax3, ax4, ax5]]  # remove the xticks
     _ = [ax.set_yticks([]) for ax in [ax1, ax2, ax3, ax4, ax5]]  # remove the yticks
     plt.tight_layout()
