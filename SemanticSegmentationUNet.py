@@ -3,13 +3,12 @@ import torch
 import os
 from torch.utils.data import DataLoader
 from unet import UNet
-from utils import train, plot_four, WeightedMSELoss
+from utils import train, validate, DiceCoefficient
 from tqdm import tqdm
-import numpy as np
 from torchvision import transforms
-import matplotlib.pyplot as plt
+import pandas as pd
 
-n_epochs = 16
+n_epochs = 250
 model_directory = "semantic_2_channel_model"
 if not os.path.isdir(model_directory):
     os.mkdir(model_directory)
@@ -21,11 +20,21 @@ source_channels = (0, 3)
 target_channels = 0
 
 print("Loading data")
-# TODO add transforms
+# TODO add more transforms
 train_data = FUCCIDataset(
-    root_dir="Julius",
+    root_dir="JuliusTrain",
     transform=transforms.RandomCrop(256),
-    # 0 = mean and 1 = variance
+    source_transform=None,
+    normalize=True,
+    source_channels=source_channels,
+    target_channels=target_channels,
+    target_ending=".tif",
+    semantic=True,
+)
+
+validate_data = FUCCIDataset(
+    root_dir="JuliusValidate",
+    transform=transforms.RandomCrop(256),
     source_transform=None,
     normalize=True,
     source_channels=source_channels,
@@ -35,6 +44,7 @@ train_data = FUCCIDataset(
 )
 
 train_loader = DataLoader(train_data, batch_size=5, shuffle=True, num_workers=8)
+validation_loader = DataLoader(validate_data, batch_size=5, shuffle=True, num_workers=8)
 
 unet = UNet(
     depth=4,
@@ -46,44 +56,34 @@ unet = UNet(
 unet.to(device)
 
 
-# loss = torch.nn.MSELoss()
 loss = torch.nn.BCELoss()
-# loss = WeightedMSELoss()
 optimizer = torch.optim.Adam(unet.parameters(), lr=1e-4)
-# optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-4)
+metric = DiceCoefficient()
+
+
+training_log = {}
+training_log["epoch"] = []
+training_log["validation_metric"] = []
+training_log["validation_loss"] = []
 
 print("Start training")
 for epoch in tqdm(range(n_epochs)):
     train(unet, train_loader, optimizer, loss, epoch, device=device)
+    val_loss, val_metric = validate(
+        unet, validation_loader, loss, metric, device=device
+    )
+    training_log["epoch"].append(epoch)
+    training_log["validation_metric"].append(val_metric)
+    training_log["validation_loss"].append(val_loss)
+
+    # save snapshot
     if epoch % 5 == 0:
         torch.save(
             unet.state_dict(), os.path.join(model_directory, "training_state.pt")
         )
 
-print("Showing example")
-# switch from training mode
-unet.eval()
 
-# TODO make it useful
-validation_data = FUCCIDataset(
-    root_dir="Julius",
-    transform=transforms.RandomCrop(256),
-    # 0 = mean and 1 = variance
-    source_transform=transforms.Normalize([0.0], [1.0]),
-    source_channels=source_channels,
-    target_channels=target_channels,
-    target_ending=".tif",
-)
-
-idx = np.random.randint(len(validation_data))
-image, mask = validation_data[idx]
-
-unet.to("cpu")
-# unsqueeze because of expected shape: batch, channel, y, x
-pred = unet(torch.unsqueeze(image, dim=0))
-
-image = np.squeeze(image)
-mask = np.squeeze(mask.numpy())
-pred_plot = np.squeeze(pred.detach().numpy())
-plot_four(image[0], image[1], mask, pred_plot)
-plt.show()
+print("Save training log")
+df = pd.DataFrame(training_log)
+df.to_csv(os.path.join(model_directory, "training_log.csv"), index=False)
+print("Done")
