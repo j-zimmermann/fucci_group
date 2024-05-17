@@ -2,7 +2,6 @@ from torch.utils.data import Dataset
 import os
 import torch
 import numpy as np
-from torchvision import transforms
 from aicsimageio import AICSImage
 from utils import compute_affinities
 
@@ -24,9 +23,8 @@ class FUCCIDataset(Dataset):
         source_folder_name="Source",
         target_folder_name="Target",
     ):
-        self.root_dir = os.path.join(
-            "/group/dl4miacourse/projects/FUCCI", root_dir
-        )  # the directory with all the training samples
+        # the directory with all the training samples
+        self.root_dir = root_dir
         self.video_files = os.listdir(
             os.path.join(self.root_dir, source_folder_name)
         )  # list the videos
